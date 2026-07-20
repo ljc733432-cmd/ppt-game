@@ -1,5 +1,9 @@
 // Auto-start monitor: detects Agent players and auto-starts the game
-(function() {
+(function setup() {
+  if (!window.ws || !ws.onmessage) {
+    setTimeout(setup, 500);
+    return;
+  }
   var spawned = false;
   var orig = ws.onmessage;
   ws.onmessage = function(e) {

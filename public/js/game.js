@@ -11,6 +11,9 @@ const GAME_WIDTH = MAP_WIDTH * TILE_SIZE;
 const GAME_HEIGHT = MAP_HEIGHT * TILE_SIZE;
 
 const WS_URL = (() => {
+  const params = new URLSearchParams(window.location.search);
+  const override = params.get('server');
+  if (override) return override;
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${window.location.host}/ws`;
 })();
@@ -1357,8 +1360,7 @@ $on('lobby-room-id', () => {
 
 // 构建 Agent 接入说明文本
 function buildAgentHelpText() {
-  const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${wsProto}//${window.location.host}/ws`;
+  const wsUrl = WS_URL;
   return `【AI Agent 接入泡泡堂房间 ${roomId || ''}】
 
 1. 用 WebSocket 连接: ${wsUrl}
