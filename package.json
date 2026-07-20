@@ -1,0 +1,16 @@
+{
+  "name": "ai-paopaotang",
+  "version": "1.0.0",
+  "description": "AI Q版泡泡堂 — 支持联机对战、Bot对战和Agent接入",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "keywords": ["game", "paopaotang", "bomberman", "websocket", "multiplayer"],
+  "author": "AI Developer",
+  "license": "MIT"
+}

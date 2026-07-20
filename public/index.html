@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Q版泡泡堂</title>
+  <script src="/js/lib/phaser.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #app { display: flex; flex-direction: column; height: 100vh; }
+
+    /* 菜单区域 */
+    #menu {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      padding: 20px;
+    }
+
+    #menu h1 {
+      font-size: 3.5rem;
+      color: #ff6b6b;
+      text-shadow: 0 0 20px rgba(255,107,107,0.5), 2px 2px 0 #c0392b;
+      margin-bottom: 10px;
+      letter-spacing: 4px;
+    }
+
+    #menu .subtitle {
+      font-size: 1.1rem;
+      color: #888;
+      margin-bottom: 40px;
+    }
+
+    .menu-card {
+      background: #16213e;
+      border-radius: 16px;
+      padding: 30px 40px;
+      max-width: 500px;
+      width: 100%;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .menu-card h2 {
+      font-size: 1.3rem;
+      color: #ff8e8e;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    .input-group { margin-bottom: 15px; }
+    .input-group label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 6px; }
+    .input-group input,
+    .input-group select {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      background: #0f172a;
+      color: #fff;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .input-group input:focus,
+    .input-group select:focus { border-color: #ff6b6b; }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: 8px;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #ff6b6b, #e74c3c);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(255,107,107,0.4);
+    }
+    .btn-secondary {
+      background: #2d3a5c;
+      color: #ccc;
+    }
+    .btn-secondary:hover { background: #3a4a6e; color: #fff; }
+    .btn-green {
+      background: linear-gradient(135deg, #2ecc71, #27ae60);
+      color: #fff;
+    }
+    .btn-green:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(46,204,113,0.4);
+    }
+
+    .btn-row { display: flex; gap: 10px; margin-top: 10px; }
+    .btn-row .btn { flex: 1; margin-top: 0; }
+
+    .hidden { display: none !important; }
+
+    /* 音乐控制按钮 */
+    #music-toggle {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 200;
+      background: #2d3a5c;
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      font-size: 1.2rem;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #music-toggle:hover { background: #3a4a6e; transform: scale(1.1); }
+    #music-toggle.muted { background: #e74c3c; }
+
+    /* 房间大厅 */
+    #lobby {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      padding: 20px;
+    }
+
+    #lobby .lobby-card {
+      background: #16213e;
+      border-radius: 16px;
+      padding: 30px;
+      max-width: 600px;
+      width: 100%;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+
+    .room-info {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .room-info .room-id {
+      font-size: 2rem;
+      color: #ffd93d;
+      font-weight: bold;
+      letter-spacing: 4px;
+      cursor: pointer;
+      user-select: all;
+    }
+    .room-info .room-id:hover { text-shadow: 0 0 10px rgba(255,217,61,0.5); }
+    .room-info .copy-hint {
+      font-size: 0.75rem;
+      color: #888;
+      margin-top: 4px;
+    }
+
+    .share-links {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 12px;
+    }
+
+    #agent-help {
+      margin-top: 15px;
+      text-align: left;
+      background: #0f172a;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 15px;
+    }
+    #agent-help h3 { color: #ff8e8e; margin-bottom: 8px; font-size: 0.95rem; }
+    #agent-help p { color: #aaa; font-size: 0.8rem; margin-bottom: 8px; }
+    #agent-help pre {
+      white-space: pre-wrap;
+      word-break: break-all;
+      font-size: 0.75rem;
+      color: #9fd;
+      background: #0a0f1e;
+      padding: 10px;
+      border-radius: 6px;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+
+    .player-list {
+      margin: 20px 0;
+    }
+    .player-list h3 { color: #ff8e8e; margin-bottom: 10px; }
+    .player-item {
+      display: flex;
+      align-items: center;
+      padding: 10px 14px;
+      margin-bottom: 8px;
+      background: #0f172a;
+      border-radius: 8px;
+      border-left: 3px solid #444;
+    }
+    .player-item.ready { border-left-color: #2ecc71; }
+    .player-item .p-avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      margin-right: 12px; display: flex; align-items: center;
+      justify-content: center; font-size: 1.2rem;
+    }
+    .player-item .p-name { flex: 1; font-weight: 500; }
+    .player-item .p-status {
+      font-size: 0.8rem;
+      padding: 4px 10px;
+      border-radius: 12px;
+    }
+    .p-status.waiting { background: #e74c3c; color: #fff; }
+    .p-status.ready { background: #2ecc71; color: #fff; }
+    .p-status.bot { background: #8e44ad; color: #fff; }
+
+    .lobby-actions { display: flex; gap: 10px; margin-top: 20px; }
+    .lobby-actions .btn { flex: 1; margin-top: 0; }
+
+    .bot-controls {
+      display: flex; gap: 8px;
+      margin-top: 15px;
+      padding: 12px;
+      background: #0f172a;
+      border-radius: 8px;
+      align-items: center;
+    }
+    .bot-controls label { font-size: 0.85rem; color: #aaa; }
+    .bot-controls select {
+      flex: 1;
+      padding: 8px;
+      border-radius: 6px;
+      background: #1a1a2e;
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .bot-controls .btn-sm {
+      padding: 8px 16px;
+      font-size: 0.85rem;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+    }
+
+    /* 游戏区域 */
+    #game-container {
+      display: none;
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    #game-container.active { display: flex; }
+
+    #phaser-game {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0d0d1a;
+    }
+    #phaser-game canvas {
+      border-radius: 8px;
+      box-shadow: 0 0 40px rgba(0,0,0,0.5);
+    }
+
+    /* 侧边栏 */
+    #sidebar {
+      width: 280px;
+      background: #16213e;
+      border-left: 1px solid rgba(255,255,255,0.05);
+      display: flex;
+      flex-direction: column;
+      padding: 16px;
+    }
+
+    .sidebar-header {
+      font-size: 0.9rem;
+      color: #ff8e8e;
+      font-weight: bold;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    #battle-log {
+      flex: 1;
+      overflow-y: auto;
+      font-size: 0.82rem;
+      line-height: 1.6;
+      color: #ccc;
+    }
+    #battle-log .log-entry {
+      padding: 6px 8px;
+      margin-bottom: 4px;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.02);
+      animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+    #battle-log .log-time { color: #666; font-size: 0.7rem; margin-right: 6px; }
+
+    #game-info {
+      padding: 12px 0;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      margin-top: 12px;
+    }
+    #game-info .info-row {
+      display: flex; justify-content: space-between;
+      font-size: 0.85rem; margin-bottom: 6px; color: #aaa;
+    }
+    #game-info .info-value { color: #ffd93d; font-weight: bold; }
+
+    .player-stats {
+      margin-top: 12px;
+    }
+    .player-stats h4 {
+      font-size: 0.85rem;
+      color: #ff8e8e;
+      margin-bottom: 8px;
+    }
+    .stat-item {
+      display: flex;
+      align-items: center;
+      padding: 6px 0;
+      font-size: 0.8rem;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+    .stat-color { width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
+    .stat-name { flex: 1; }
+    .stat-lives { color: #e74c3c; font-weight: bold; }
+    .stat-kills { color: #2ecc71; margin-left: 8px; }
+
+    /* 结算画面 */
+    #result-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.85);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+    }
+    #result-overlay.active { display: flex; }
+    .result-card {
+      background: #16213e;
+      border-radius: 20px;
+      padding: 40px 60px;
+      text-align: center;
+      max-width: 500px;
+      animation: popIn 0.5s ease;
+    }
+    @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .result-card h1 { font-size: 2.5rem; margin-bottom: 10px; }
+    .result-card .winner { color: #ffd93d; }
+    .result-card .draw { color: #888; }
+    .result-card .stats-table { margin: 20px 0; text-align: left; }
+    .result-card .stats-table th { color: #ff8e8e; padding: 8px 16px; font-size: 0.9rem; }
+    .result-card .stats-table td { padding: 8px 16px; font-size: 0.9rem; }
+    .result-card .stats-table tr:nth-child(even) { background: rgba(255,255,255,0.03); }
+
+    /* 操作提示 */
+    .controls-hint {
+      position: fixed;
+      bottom: 10px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.7);
+      padding: 8px 20px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      color: #aaa;
+      z-index: 50;
+      pointer-events: none;
+    }
+
+    /* 滚动条 */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+
+    /* 连接状态 */
+    #connection-status {
+      position: fixed; top: 10px; right: 10px;
+      padding: 6px 12px; border-radius: 12px;
+      font-size: 0.75rem; font-weight: bold;
+      z-index: 200;
+      transition: all 0.3s;
+    }
+    #connection-status.connected { background: #2ecc71; color: #fff; }
+    #connection-status.disconnected { background: #e74c3c; color: #fff; }
+    #connection-status.connecting { background: #f39c12; color: #fff; }
+  </style>
+</head>
+<body>
+  <button id="music-toggle" title="播放/暂停背景音乐">🔇</button>
+
+  <div id="connection-status" class="connecting">连接中...</div>
+
+  <!-- 菜单 -->
+  <div id="menu">
+    <h1>AI Q版泡泡堂</h1>
+    <p class="subtitle">支持联机对战 · Bot对战 · Agent接入</p>
+
+    <div class="menu-card">
+      <h2 id="menu-title">开始游戏</h2>
+
+      <div id="create-section">
+        <div class="input-group">
+          <label>你的名字</label>
+          <input type="text" id="player-name" placeholder="输入你的昵称" maxlength="12">
+        </div>
+        <div class="input-group">
+          <label>游戏模式</label>
+          <select id="game-mode">
+            <option value="ffa">自由混战 (FFA)</option>
+            <option value="1v1">1v1 对战</option>
+            <option value="2v2">2v2 组队</option>
+            <option value="pve">人机挑战</option>
+          </select>
+        </div>
+        <div class="input-group">
+          <label>地图</label>
+          <select id="map-select">
+            <option value="classic">经典地图</option>
+            <option value="arena">竞技场</option>
+            <option value="maze">迷宫</option>
+            <option value="sparse">荒野</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="btn-create">创建房间</button>
+        <div class="btn-row">
+          <button class="btn btn-secondary" id="btn-join-tab">加入房间</button>
+          <button class="btn btn-secondary" id="btn-list">查看房间</button>
+        </div>
+      </div>
+
+      <div id="room-list-section" class="hidden">
+        <h2 style="color:#ff8e8e;text-align:center;margin-bottom:20px;">可加入的房间</h2>
+        <div id="room-list-container"></div>
+        <button class="btn btn-secondary" id="btn-back-menu" style="margin-top:15px;">返回</button>
+      </div>
+
+      <div id="join-section" class="hidden">
+        <div class="input-group">
+          <label>房间号</label>
+          <input type="text" id="join-room-id" placeholder="输入4位房间号" maxlength="4" style="text-transform:uppercase">
+        </div>
+        <button class="btn btn-green" id="btn-join">加入房间</button>
+        <button class="btn btn-secondary" id="btn-back-create">返回</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 房间大厅 -->
+  <div id="lobby" class="hidden">
+    <div class="lobby-card">
+      <div class="room-info">
+        <div>房间号</div>
+        <div class="room-id" id="lobby-room-id">----</div>
+        <div class="copy-hint">点击复制房间号</div>
+      </div>
+
+      <div class="share-links">
+        <button class="btn-sm btn-green" id="btn-copy-player-link">📋 复制玩家邀请链接</button>
+        <button class="btn-sm btn-secondary" id="btn-copy-agent-link">🤖 复制 Agent 接入说明</button>
+      </div>
+
+      <div id="agent-help" class="hidden">
+        <h3>🤖 AI Agent 接入说明</h3>
+        <p>把下面这段说明发给你的 AI Agent，它就能自己连进房间游玩：</p>
+        <pre id="agent-help-text"></pre>
+      </div>
+
+      <div class="player-list" id="player-list">
+        <h3>房间成员</h3>
+        <div id="players-container"></div>
+      </div>
+
+      <div class="bot-controls" id="bot-controls">
+        <label>添加Bot：</label>
+        <select id="bot-difficulty">
+          <option value="easy">简单</option>
+          <option value="medium" selected>中等</option>
+          <option value="hard">困难</option>
+          <option value="insane">疯子</option>
+        </select>
+        <button class="btn-sm btn-green" id="btn-add-bot">添加</button>
+        <button class="btn-sm btn-secondary" id="btn-remove-bot">移除</button>
+      </div>
+
+      <div class="lobby-actions">
+        <button class="btn btn-secondary" id="btn-ready">准备</button>
+        <button class="btn btn-primary" id="btn-start">开始游戏</button>
+        <button class="btn btn-secondary" id="btn-leave">离开</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 游戏区域 -->
+  <div id="game-container">
+    <div id="phaser-game"></div>
+    <div id="sidebar">
+      <div class="sidebar-header">战斗日志</div>
+      <div id="battle-log"></div>
+      <div id="game-info">
+        <div class="info-row">剩余时间 <span class="info-value" id="time-display">03:00</span></div>
+        <div class="info-row">我的命数 <span class="info-value" id="lives-display">2</span></div>
+        <div class="info-row">击杀数 <span class="info-value" id="kills-display">0</span></div>
+      </div>
+      <div class="player-stats" id="player-stats">
+        <h4>玩家状态</h4>
+        <div id="stats-container"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 结算画面 -->
+  <div id="result-overlay">
+    <div class="result-card">
+      <h1 id="result-title">游戏结束</h1>
+      <table class="stats-table" id="result-stats"></table>
+      <div class="btn-row" style="margin-top:20px">
+        <button class="btn btn-primary" id="btn-again">再来一局</button>
+        <button class="btn btn-secondary" id="btn-lobby">返回大厅</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 操作提示 -->
+  <div class="controls-hint" id="controls-hint">
+    <kbd>WASD</kbd> 移动 &nbsp; <kbd>空格</kbd> 放炸弹 &nbsp; <kbd>E</kbd> 踢炸弹
+  </div>
+
+  <script src="js/game.js?v=b12"></script>
+  <script src="js/auto-start.js?v=1"></script>
+</body>
+</html>
