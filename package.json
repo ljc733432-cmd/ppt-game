@@ -5,12 +5,23 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
   },
   "dependencies": {
     "ws": "^8.18.0"
   },
-  "keywords": ["game", "paopaotang", "bomberman", "websocket", "multiplayer"],
+  "keywords": [
+    "game",
+    "paopaotang",
+    "bomberman",
+    "websocket",
+    "multiplayer"
+  ],
   "author": "AI Developer",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^4.112.0"
+  }
 }
