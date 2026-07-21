@@ -15,7 +15,16 @@ const WS_URL = (() => {
   const override = params.get('server');
   if (override) return override;
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/ws`;
+  let url = `${protocol}//${window.location.host}/ws`;
+  // 观战/入房模式：把房间号传给 WebSocket URL，让服务端设置 ws.roomId
+  const room = params.get('room');
+  if (room) {
+    const wsParams = new URLSearchParams();
+    wsParams.set('room', room);
+    if (params.get('spectate') === '1') wsParams.set('spectate', '1');
+    url += '?' + wsParams.toString();
+  }
+  return url;
 })();
 
 // ============ 状态管理 ============
@@ -30,6 +39,8 @@ let _inputLoggedPhase = false;
 let _inputLoggedId = false;
 
 let isReconnecting = false;
+let isAgentHost = false;
+let expectedAgentCount = 0;
 
 // ============ 背景音乐 ============
 let bgmAudio = null;
@@ -148,11 +159,21 @@ function connect() {
     const urlParams = new URLSearchParams(window.location.search);
     const autoRoomId = urlParams.get('room');
     const isWatch = urlParams.get('watch') === '1';
+    const agentCount = parseInt(urlParams.get('agents')) || 0;
+    const isSpectate = urlParams.get('spectate') === '1';
 
-    if (autoRoomId) {
+    if (isWatch) {
+      isAgentHost = true;
+      expectedAgentCount = agentCount;
+    }
+
+    if (autoRoomId && isSpectate) {
+      // 观战：ws.roomId 已通过 WS URL 参数设置，直接发 spectate
+      send({ type: 'spectate' });
+    } else if (autoRoomId) {
       const name = document.getElementById('player-name').value || '玩家';
       send({ type: 'joinRoom', roomId: autoRoomId.toUpperCase(), playerName: name });
-      setTimeout(() => send({ type: 'setReady', ready: true }), 300);
+      // 不自动准备 — 真人需要手动准备；Agent 由 auto-start.js 接管
     } else if (isWatch) {
       const name = document.getElementById('player-name').value || '观众';
       const mode = document.getElementById('game-mode').value;
@@ -226,9 +247,9 @@ function handleServerMessage(msg) {
       enterLobby(msg.roomId);
       autoStartWatching = true;
       autoStartFired = false;
+      // Agent 房主自动准备；开战由 auto-start.js 接管
       setTimeout(() => {
         send({ type: 'setReady', ready: true });
-        setTimeout(() => tryAutoStart(), 600);
       }, 400);
       break;
 
@@ -238,11 +259,7 @@ function handleServerMessage(msg) {
       gameState = msg.state;
       enterLobby(msg.roomId);
       updatePlayerList(msg.state);
-      autoStartWatching = true;
-      setTimeout(() => {
-        send({ type: 'setReady', ready: true });
-        setTimeout(() => tryAutoStart(), 600);
-      }, 400);
+      // 不自动准备 — 真人手动操作；Agent 由 auto-start.js 发信号
       break;
 
     case 'playerList':
@@ -294,12 +311,36 @@ function handleServerMessage(msg) {
     case 'chat':
       addChatMessage(`${msg.playerId}: ${msg.text}`);
       break;
+
+    case 'possessed':
+      // 夺舍成功，直接进入游戏
+      myPlayerId = msg.playerId;
+      roomId = msg.roomId;
+      gameState = msg.state;
+      startGame(msg.state);
+      break;
+
+    case 'waitingForNextRound':
+      // 没有可夺舍的 Bot，等待下一局
+      showWaitingOverlay(msg.roomId);
+      break;
+
+    case 'spectating':
+      // 观战模式：渲染游戏但不接受输入
+      gameState = msg.state;
+      roomId = msg.roomId;
+      startSpectatorView(msg.state);
+      break;
   }
 }
 
 // ============ UI 控制 ============
 function showMenu() {
   gameStarting = false;
+  // 清理等待覆盖层
+  const wo = document.getElementById('waiting-overlay');
+  if (wo) wo.style.display = 'none';
+  if (this._waitingInterval) { clearInterval(this._waitingInterval); this._waitingInterval = null; }
   document.getElementById('menu').classList.remove('hidden');
   document.getElementById('lobby').classList.add('hidden');
   document.getElementById('game-container').classList.remove('active');
@@ -309,6 +350,7 @@ function showMenu() {
   document.getElementById('join-section').classList.add('hidden');
   history.pushState({}, '', window.location.pathname);
   isReady = false;
+  isSpectating = false;
   roomId = null;
   autoStartWatching = false;
   autoStartFired = false;
@@ -324,6 +366,40 @@ function enterLobby(rid) {
   document.getElementById('btn-ready').textContent = '准备';
   document.getElementById('btn-ready').className = 'btn btn-secondary';
   isReady = false;
+}
+
+function showWaitingOverlay(rid) {
+  // 隐藏大厅和菜单，显示游戏区域 + 等待提示
+  document.getElementById('menu').classList.add('hidden');
+  document.getElementById('lobby').classList.add('hidden');
+  document.getElementById('game-container').classList.add('active');
+  document.getElementById('result-overlay').classList.remove('active');
+  document.getElementById('battle-log').innerHTML = '';
+  document.getElementById('controls-hint').style.display = 'none';
+
+  // 在游戏区域显示等待覆盖层
+  let overlay = document.getElementById('waiting-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'waiting-overlay';
+    overlay.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,0.8);z-index:60;border-radius:8px';
+    overlay.innerHTML = `
+      <div style="font-size:2rem;color:#ffd93d;margin-bottom:16px;">⏳ 正在游戏中...</div>
+      <div style="color:#aaa;font-size:1rem;margin-bottom:8px;">房间 ${rid}</div>
+      <div style="color:#888;font-size:0.85rem;">没有可夺舍的活 Bot，等待下一局自动加入</div>
+      <div id="waiting-dots" style="color:#ff8e8e;font-size:1.5rem;margin-top:12px;"></div>
+    `;
+    document.getElementById('game-container').appendChild(overlay);
+
+    // 跳动点动画
+    let dots = 0;
+    this._waitingInterval = setInterval(() => {
+      dots = (dots + 1) % 4;
+      const el = document.getElementById('waiting-dots');
+      if (el) el.textContent = '.'.repeat(dots) || '·';
+    }, 500);
+  }
+  overlay.style.display = 'flex';
 }
 
 function updatePlayerList(data) {
@@ -352,10 +428,26 @@ function updatePlayerList(data) {
 }
 
 function updatePlayerReady(pid, ready) {
-  // 更新本地状态
+  // 更新本地 gameState
   if (gameState) {
-    const p = gameState.players[pid] || gameState.bots[pid];
-    if (p) p.ready = ready;
+    const allPlayers = gameState.players;
+    if (allPlayers) {
+      // players 可能是对象或数组（来自不同消息源）
+      if (Array.isArray(allPlayers)) {
+        const p = allPlayers.find(x => x.id === pid);
+        if (p) p.ready = ready;
+      } else {
+        const p = allPlayers[pid] || (gameState.bots && gameState.bots[pid]);
+        if (p) p.ready = ready;
+      }
+    }
+  }
+  // 刷新 UI 列表
+  if (gameState) {
+    updatePlayerList({
+      players: gameState.players,
+      bots: gameState.bots || {}
+    });
   }
 }
 
@@ -1200,6 +1292,9 @@ class GameScene extends Phaser.Scene {
   }
 
   update() {
+    // 观战模式：只渲染，不接受输入
+    if (isSpectating) return;
+
     if (!gameState || gameState.phase !== 'playing') {
       if (!_inputLoggedPhase && gameState) { _inputLoggedPhase = true; console.log('[Input] phase:', gameState.phase); }
       return;
@@ -1263,6 +1358,9 @@ function startGame(state) {
   document.getElementById('result-overlay').classList.remove('active');
   document.getElementById('battle-log').innerHTML = '';
   document.getElementById('controls-hint').style.display = 'block';
+  // 清理等待覆盖层
+  const wo = document.getElementById('waiting-overlay');
+  if (wo) wo.style.display = 'none';
 
   // 安全销毁旧游戏
   if (game) {
@@ -1275,6 +1373,9 @@ function startGame(state) {
   send._warned = false;
   _inputLoggedPhase = false;
   _inputLoggedId = false;
+  isSpectating = false;
+  // 恢复操作提示
+  document.getElementById('controls-hint').innerHTML = '<kbd>WASD</kbd> 移动 &nbsp; <kbd>空格</kbd> 放炸弹 &nbsp; <kbd>E</kbd> 踢炸弹';
 
   // 根据地图主题设置背景色
   const theme = state && state.mapName ? (MAP_THEMES[state.mapName] || MAP_THEMES.classic) : MAP_THEMES.classic;
@@ -1300,6 +1401,60 @@ function startGame(state) {
       }
     });
     // 等待场景创建完成
+    setTimeout(() => {
+      gameScene = game.scene.getScene('GameScene');
+    }, 500);
+  }, 100);
+}
+
+let isSpectating = false;
+
+function startSpectatorView(state) {
+  gameStarting = false;
+  isSpectating = true;
+
+  document.getElementById('menu').classList.add('hidden');
+  document.getElementById('lobby').classList.add('hidden');
+  document.getElementById('game-container').classList.add('active');
+  document.getElementById('result-overlay').classList.remove('active');
+  document.getElementById('battle-log').innerHTML = '';
+  // 观战提示替代操作提示
+  const hint = document.getElementById('controls-hint');
+  hint.style.display = 'block';
+  hint.innerHTML = '👁️ <b>观战中</b> — 上帝视角观看对局';
+  const wo = document.getElementById('waiting-overlay');
+  if (wo) wo.style.display = 'none';
+
+  if (game) {
+    try { game.destroy(true); } catch (e) {}
+    game = null; gameScene = null;
+  }
+
+  send._warned = false;
+  _inputLoggedPhase = false;
+  _inputLoggedId = false;
+
+  const theme = state && state.mapName ? (MAP_THEMES[state.mapName] || MAP_THEMES.classic) : MAP_THEMES.classic;
+
+  setTimeout(() => {
+    game = new Phaser.Game({
+      type: Phaser.AUTO,
+      width: GAME_WIDTH,
+      height: GAME_HEIGHT,
+      parent: 'phaser-game',
+      backgroundColor: theme.bg,
+      scene: [GameScene],
+      pixelArt: true,
+      physics: { default: false },
+      input: {
+        keyboard: { target: window },
+        mouse: { target: null, preventDefaultWheel: true }
+      },
+      scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH
+      }
+    });
     setTimeout(() => {
       gameScene = game.scene.getScene('GameScene');
     }, 500);

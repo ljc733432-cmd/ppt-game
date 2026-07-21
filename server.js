@@ -121,9 +121,10 @@ function handleMessage(ws, msg) {
       const { mode, mapName, playerName } = msg;
       leaveCurrentRoom(ws);
       const room = createRoom(mode, mapName, playerName);
-      ws.playerId = room.addPlayer(playerName, ws);
+      const result = room.addPlayer(playerName, ws);
+      ws.playerId = result.playerId;
       ws.roomId = room.id;
-      ws.send(JSON.stringify({ type: 'roomCreated', roomId: room.id, playerId: ws.playerId }));
+      ws.send(JSON.stringify({ type: 'roomCreated', roomId: room.id, playerId: result.playerId }));
       break;
     }
     case 'joinRoom': {
@@ -134,12 +135,25 @@ function handleMessage(ws, msg) {
         return;
       }
       leaveCurrentRoom(ws);
-      // 同一身份（同名）重复进入：踢掉旧的自己，保证一个身份只有一份
-      room.removePlayerByName(playerName);
-      ws.playerId = room.addPlayer(playerName, ws);
+      // 仅在等待阶段除重（游戏中走夺舍不会重名）
+      if (room.phase !== 'playing') {
+        room.removePlayerByName(playerName);
+      }
+      const result = room.addPlayer(playerName, ws);
+      if (result.waiting) {
+        // 加入等待队列，前端显示"正在游戏中..."
+        ws.roomId = room.id; // 保留 roomId 用于断线清理
+        return;
+      }
+      ws.playerId = result.playerId;
       ws.roomId = room.id;
-      ws.send(JSON.stringify({ type: 'joined', roomId: room.id, playerId: ws.playerId, state: room.getState() }));
-      room.broadcast({ type: 'playerJoined', playerId: ws.playerId, name: playerName }, ws);
+      if (result.possessed) {
+        // 夺舍成功，前端直接进入游戏
+        room.broadcast({ type: 'playerJoined', playerId: result.playerId, name: playerName }, ws);
+      } else {
+        ws.send(JSON.stringify({ type: 'joined', roomId: room.id, playerId: result.playerId, state: room.getState() }));
+        room.broadcast({ type: 'playerJoined', playerId: result.playerId, name: playerName }, ws);
+      }
       break;
     }
     case 'joinAsAgent': {
@@ -150,18 +164,28 @@ function handleMessage(ws, msg) {
         return;
       }
       leaveCurrentRoom(ws);
-      room.removePlayerByName(name || 'Agent');
-      ws.playerId = room.addPlayer(name || 'Agent', ws, true);
+      if (room.phase !== 'playing') {
+        room.removePlayerByName(name || 'Agent');
+      }
+      const result = room.addPlayer(name || 'Agent', ws, true);
+      if (result.waiting) {
+        ws.roomId = room.id;
+        return;
+      }
+      ws.playerId = result.playerId;
       ws.roomId = room.id;
       ws.isAgent = true;
-      ws.send(JSON.stringify({ type: 'joined', roomId: room.id, playerId: ws.playerId, state: room.getState() }));
-      room.broadcast({ type: 'agentJoined', playerId: ws.playerId, name: name || 'Agent' }, ws);
+      if (result.possessed) {
+        room.broadcast({ type: 'agentJoined', playerId: result.playerId, name: name || 'Agent' }, ws);
+      } else {
+        ws.send(JSON.stringify({ type: 'joined', roomId: room.id, playerId: result.playerId, state: room.getState() }));
+        room.broadcast({ type: 'agentJoined', playerId: result.playerId, name: name || 'Agent' }, ws);
+      }
       break;
     }
     case 'spectate': {
       if (room) {
         room.addSpectator(ws);
-        ws.send(JSON.stringify({ type: 'spectating', roomId: room.id, state: room.getState() }));
       }
       break;
     }

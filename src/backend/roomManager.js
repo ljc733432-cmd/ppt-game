@@ -49,6 +49,7 @@ class Room {
       { x: 11, y: 1 },
       { x: 1, y: 9 }
     ];
+    this.waitingQueue = []; // 等待下一局的玩家
   }
 
   getMaxPlayers() {
@@ -62,6 +63,24 @@ class Room {
   }
 
   addPlayer(name, ws, isAgent = false) {
+    // 游戏进行中 → 尝试夺舍活着的 Bot
+    if (this.phase === 'playing') {
+      const target = this.findPossessableBot();
+      if (target) return this.possessBot(target, name, ws, isAgent);
+      // 没有活 Bot 可夺舍 → 加入等待队列
+      this.waitingQueue.push({ name, ws, isAgent });
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'waitingForNextRound', roomId: this.id }));
+      }
+      this.broadcast({ type: 'playerList', players: this.getPlayerList() });
+      return { waiting: true };
+    }
+
+    return this._addPlayerInternal(name, ws, isAgent);
+  }
+
+  // 内部：创建玩家实体（不检查夺舍）
+  _addPlayerInternal(name, ws, isAgent) {
     const playerId = `p${this.nextPlayerNum++}`;
     const spawnIndex = this.players.size % this.spawnPoints.length;
     const spawn = this.spawnPoints[spawnIndex];
@@ -74,11 +93,11 @@ class Room {
       x: spawn.x,
       y: spawn.y,
       bombs: 3,
-      maxBombs: 3, // 初始可连放3颗
+      maxBombs: 3,
       power: 1,
       speed: 1,
       lives: 2,
-      invincible: 0, // 无敌时间（秒）
+      invincible: 0,
       ready: false,
       kills: 0,
       itemsPicked: 0,
@@ -95,7 +114,56 @@ class Room {
     if (!this.hostId) this.hostId = playerId;
 
     this.broadcast({ type: 'playerList', players: this.getPlayerList() });
-    return playerId;
+    return { playerId };
+  }
+
+  // 找一个活着的 Bot（未被淘汰且有命数）
+  findPossessableBot() {
+    for (const [botId, bot] of this.bots) {
+      if (!bot.dead && bot.lives > 0) return { botId, bot };
+    }
+    return null;
+  }
+
+  // 夺舍：接管 Bot 的所有状态
+  possessBot({ botId, bot }, name, ws, isAgent) {
+    const playerId = botId; // 复用 Bot ID
+    const player = {
+      id: playerId,
+      name: name || `玩家${this.players.size + 1}`,
+      ws: ws,
+      isAgent: isAgent,
+      x: bot.x, y: bot.y,
+      bombs: bot.bombs,
+      maxBombs: bot.maxBombs,
+      power: bot.power,
+      speed: bot.speed,
+      lives: bot.lives,
+      invincible: 1, // 夺舍后 1 秒短暂无敌
+      ready: true,
+      kills: bot.kills,
+      itemsPicked: bot.itemsPicked,
+      color: bot.color,
+      direction: bot.direction,
+      dead: false,
+      canKick: bot.canKick,
+      ghostMode: bot.ghostMode,
+      team: this.getTeam(playerId),
+      lastMoveTick: 0,
+      moveCooldown: 0
+    };
+
+    const oldBotName = bot.name;
+    this.players.set(playerId, player);
+    this.bots.delete(botId);
+
+    this.addBattleLog(`👻 ${name} 夺舍了 ${oldBotName}！`);
+    this.broadcast({ type: 'playerList', players: this.getPlayerList() });
+
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'possessed', playerId, state: this.getState() }));
+    }
+    return { playerId, possessed: true };
   }
 
   getTeam(playerId) {
@@ -149,7 +217,7 @@ class Room {
 
   addSpectator(ws) {
     this.spectators.push(ws);
-    ws.send(JSON.stringify({ type: 'spectating', state: this.getState() }));
+    ws.send(JSON.stringify({ type: 'spectating', roomId: this.id, state: this.getState() }));
   }
 
   removePlayer(playerId, closeWs = true) {
@@ -256,6 +324,22 @@ class Room {
       idx++;
     });
 
+    // 从等待队列拉人加入本局（夺舍场景）
+    while (this.waitingQueue.length > 0) {
+      const maxForMode = { '1v1': 2, '2v2': 4, 'ffa': 4, 'pve': 4 }[this.mode] || 4;
+      if (this.players.size >= maxForMode) break;
+      const w = this.waitingQueue.shift();
+      const result = this._addPlayerInternal(w.name, w.ws, w.isAgent);
+      const newPlayer = this.players.get(result.playerId);
+      if (newPlayer) {
+        newPlayer.ready = true;
+        newPlayer.invincible = 3;
+        if (w.ws && w.ws.readyState === 1) {
+          w.ws.send(JSON.stringify({ type: 'gameStarted', state: this.getState() }));
+        }
+      }
+    }
+
     this.broadcast({ type: 'gameStarted', state: this.getState() });
     this.addBattleLog('游戏开始！祝各位好运！');
 
@@ -338,9 +422,14 @@ class Room {
 
   broadcast(msg, excludeWs = null) {
     const data = JSON.stringify(msg);
-    [...this.players.values(), ...this.spectators].forEach(p => {
+    [...this.players.values()].forEach(p => {
       if (p.ws && p.ws !== excludeWs && p.ws.readyState === 1) {
         try { p.ws.send(data); } catch (e) {}
+      }
+    });
+    this.spectators.forEach(ws => {
+      if (ws && ws !== excludeWs && ws.readyState === 1) {
+        try { ws.send(data); } catch (e) {}
       }
     });
   }
